@@ -73,7 +73,9 @@ def train(cfg: DictConfig) -> None:
     )
 
     trainer.fit(model, datamodule=dm)
-    trainer.test(model, datamodule=dm, ckpt_path="best")
+    # In fast_dev_run mode no checkpoint is saved, so use current weights
+    ckpt = None if cfg.training.fast_dev_run else "best"
+    trainer.test(model, datamodule=dm, ckpt_path=ckpt)
 
 
 if __name__ == "__main__":
