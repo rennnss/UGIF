@@ -31,13 +31,22 @@ print("Drive mounted.")
 # ──────────────────────────────────────────────────────────────
 # CELL 3 — Clone the UGIF project + copernicus_api dependency
 # ──────────────────────────────────────────────────────────────
-!git clone {REPO_URL} {PROJECT_DIR}
+import os, shutil
 
-!git clone https://github.com/armkhudinyan/copernicus_api.git \
-    {PROJECT_DIR}/third_party/copernicus_api
+# Reset cwd — Colab shell can get stuck in a deleted directory
+os.chdir('/content')
 
-print(f"Project ready at {PROJECT_DIR}")
-!ls {PROJECT_DIR}
+# Clean up any partial clone from a previous failed attempt
+if os.path.exists(PROJECT_DIR):
+    shutil.rmtree(PROJECT_DIR)
+
+os.system(f"git clone {REPO_URL} {PROJECT_DIR}")
+os.makedirs(f"{PROJECT_DIR}/third_party", exist_ok=True)
+os.system(f"git clone https://github.com/armkhudinyan/copernicus_api.git "
+          f"{PROJECT_DIR}/third_party/copernicus_api")
+
+print(f"\nProject ready at {PROJECT_DIR}")
+print(os.listdir(PROJECT_DIR))
 
 
 # ──────────────────────────────────────────────────────────────
