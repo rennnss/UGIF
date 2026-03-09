@@ -96,7 +96,11 @@ class LEVIRCDPatchDataset(Dataset):
     def _synthetic_sample(self, idx: int) -> Dict[str, torch.Tensor]:
         rng = np.random.default_rng(seed=idx)
         H = W = self.patch_size
-        pre = torch.from_numpy(rng.random((3, H, W), dtype=np.float32))
+        pre  = torch.from_numpy(rng.random((3, H, W), dtype=np.float32))
         post = torch.from_numpy(rng.random((3, H, W), dtype=np.float32))
         mask = torch.from_numpy((rng.random((1, H, W)) > 0.7).astype(np.float32))
-        return {"pre_image": pre, "post_image": post, "mask": mask}
+        sample = {"pre_image": pre, "post_image": post, "mask": mask}
+        # Apply transform (including SAR fusion) — same as the real data path
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample
