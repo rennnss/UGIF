@@ -2,14 +2,15 @@ data:
   root: ./data/LEVIR-CD
   patch_size: 256
   batch_size: 8
-  num_workers: 2          # Colab-safe; TorchGeo suggests ≤2 on free tier
-  download: false         # set to true on first run to auto-download LEVIR-CD
+  num_workers: 4
+  val_split: 0.1
+  test_split: 0.1
 
 model:
-  in_channels: 5          # 3 optical (RGB) + 2 SAR channels (VV/VH)
-  num_features: 4         # Buildings, Roads, Vegetation, Infrastructure
-  feature_dim: 128        # embedding dimension for CSN
-  r_max: 10               # ratio clipping for DII
+  in_channels: 5        # 3 optical (RGB) + 2 SAR channels (VV/VH)
+  num_features: 4       # Buildings, Roads, Vegetation, Infrastructure
+  feature_dim: 128      # embedding dimension for CSN
+  r_max: 10             # ratio clipping for DII
   epsilon: 1.0e-6
   pretrained: false
 
@@ -17,9 +18,9 @@ training:
   max_epochs: 50
   lr: 1.0e-4
   weight_decay: 1.0e-5
-  margin: 1.0             # contrastive loss margin
+  margin: 1.0           # contrastive loss margin
   scheduler: cosine
-  patience: 10            # early stopping patience
+  patience: 0           # early stopping patience (0 to disable)
   fast_dev_run: false
 
 explainability:

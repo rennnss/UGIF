@@ -60,8 +60,7 @@ print(os.listdir(PROJECT_DIR))
     geopandas geopy rasterio \
     python-dotenv \
     spacy \
-    torchgeo \
-    kornia
+    torchgeo
 
 !python -m spacy download en_core_web_sm -q
 
@@ -81,8 +80,8 @@ import sys
 os.chdir(PROJECT_DIR)
 
 # Now 'src' is a proper installed package — no manual sys.path hacks needed
-from src.data.sar_downloader import SARDownloader     # type: ignore
-from src.data.levir_dataset import LEVIRCDPatchDataset # type: ignore
+from src.data.sar_downloader import SARDownloader      # type: ignore
+from torchgeo.datasets import LEVIRCDPlus              # type: ignore
 from src.models.siamese import SiameseFCN              # type: ignore
 from src.explainability.dii import compute_dii_improved# type: ignore
 

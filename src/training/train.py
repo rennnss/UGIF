@@ -42,7 +42,6 @@ def train(cfg: DictConfig) -> None:
         patch_size=cfg.data.patch_size,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
-        download=cfg.data.get("download", False),
     )
 
     # ── Model ────────────────────────────────────────────────────────
@@ -58,7 +57,10 @@ def train(cfg: DictConfig) -> None:
     )
 
     # ── Trainer ──────────────────────────────────────────────────────
-    callbacks = get_callbacks(output_dir=cfg.output.dir)
+    callbacks = get_callbacks(
+        output_dir=cfg.output.dir,
+        patience=cfg.training.get("patience", 0)
+    )
 
     trainer = pl.Trainer(
         max_epochs=cfg.training.max_epochs,

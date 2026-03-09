@@ -100,7 +100,7 @@ class LEVIRCDPatchDataset(Dataset):
         post = torch.from_numpy(rng.random((3, H, W), dtype=np.float32))
         mask = torch.from_numpy((rng.random((1, H, W)) > 0.7).astype(np.float32))
         sample = {"pre_image": pre, "post_image": post, "mask": mask}
-        # Transform is applied by caller if needed (test_with_fusion_transform)
+        # Apply transform (including SAR fusion) — same as the real data path
         if self.transform is not None:
             sample = self.transform(sample)
         return sample
