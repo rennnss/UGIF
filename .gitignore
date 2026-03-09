@@ -3,8 +3,8 @@ third_party/
 __pycache__/
 *.pyc
 .env
-outputs/
-data/
+/data/
+/outputs/
 *.zip
 .pytest_cache/
 *.egg-info/

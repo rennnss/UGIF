@@ -113,7 +113,7 @@ dl.download(
     end_date="2023-08-31",
     out_dir=SAR_OUT,
     prod_type="GRD",
-    orbit_direction="ASCENDING",
+    # orbit_direction="ASCENDING",  # uncomment to filter by orbit once download works
     max_products=5,
 )
 
