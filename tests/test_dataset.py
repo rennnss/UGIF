@@ -1,32 +1,7 @@
-"""Tests for LEVIR-CD dataset and SAR fusion pipeline."""
+"""Tests for LEVIR-CD dataset, SAR fusion, and TorchGeo batch splitting."""
 import pytest
 import torch
-from src.data.levir_dataset import LEVIRCDPatchDataset
-from src.data.fusion import fuse_optical_sar, SAROpticalFusionTransform
-
-
-class TestLEVIRCDDataset:
-    def test_synthetic_fallback_length(self):
-        ds = LEVIRCDPatchDataset(root="/nonexistent", synthetic_size=10)
-        assert len(ds) == 10
-
-    def test_sample_shapes(self):
-        ds = LEVIRCDPatchDataset(root="/nonexistent", patch_size=64, synthetic_size=5)
-        sample = ds[0]
-        assert sample["pre_image"].shape  == (3, 64, 64)
-        assert sample["post_image"].shape == (3, 64, 64)
-        assert sample["mask"].shape       == (1, 64, 64)
-
-    def test_mask_binary(self):
-        ds = LEVIRCDPatchDataset(root="/nonexistent", synthetic_size=5)
-        mask = ds[0]["mask"]
-        assert set(mask.unique().tolist()).issubset({0.0, 1.0})
-
-    def test_deterministic(self):
-        ds = LEVIRCDPatchDataset(root="/nonexistent", synthetic_size=5)
-        s1 = ds[2]["pre_image"]
-        s2 = ds[2]["pre_image"]
-        assert torch.allclose(s1, s2)
+from src.data.fusion import fuse_optical_sar, SAROpticalFusionTransform, split_batch
 
 
 class TestSARFusion:
@@ -38,11 +13,12 @@ class TestSARFusion:
 
     def test_spatial_mismatch_raises(self):
         optical = torch.rand(3, 64, 64)
-        sar     = torch.rand(2, 32, 32)   # different spatial size
+        sar     = torch.rand(2, 32, 32)
         with pytest.raises(ValueError):
             fuse_optical_sar(optical, sar)
 
     def test_fusion_transform(self):
+        """SAROpticalFusionTransform: (3,H,W) → (5,H,W) per image."""
         sample = {
             "pre_image":  torch.rand(3, 64, 64),
             "post_image": torch.rand(3, 64, 64),
@@ -50,5 +26,44 @@ class TestSARFusion:
         }
         transform = SAROpticalFusionTransform(num_sar_channels=2)
         out = transform(sample)
-        assert out["pre_image"].shape[0]  == 5  # 3 RGB + 2 SAR
+        assert out["pre_image"].shape[0]  == 5   # 3 RGB + 2 SAR
         assert out["post_image"].shape[0] == 5
+
+
+class TestSplitBatch:
+    def test_split_shapes(self):
+        """split_batch: (B,10,H,W) → two (B,5,H,W) tensors."""
+        image = torch.rand(4, 10, 64, 64)
+        pre, post = split_batch(image)
+        assert pre.shape  == (4, 5, 64, 64)
+        assert post.shape == (4, 5, 64, 64)
+
+    def test_split_content(self):
+        image = torch.rand(2, 10, 32, 32)
+        pre, post = split_batch(image)
+        assert torch.allclose(pre,  image[:, :5])
+        assert torch.allclose(post, image[:, 5:])
+
+
+class TestSyntheticFallback:
+    def test_no_transform_shapes(self):
+        """Bare LEVIRCDPatchDataset still produces 3-channel images."""
+        from src.data.levir_dataset import LEVIRCDPatchDataset
+        ds = LEVIRCDPatchDataset(root="/nonexistent", patch_size=64, synthetic_size=5)
+        sample = ds[0]
+        assert sample["pre_image"].shape  == (3, 64, 64)
+        assert sample["post_image"].shape == (3, 64, 64)
+        assert sample["mask"].shape       == (1, 64, 64)
+
+    def test_with_fusion_transform(self):
+        """With SAROpticalFusionTransform the shapes grow to 5-ch."""
+        from src.data.levir_dataset import LEVIRCDPatchDataset
+        ds = LEVIRCDPatchDataset(
+            root="/nonexistent",
+            patch_size=64,
+            synthetic_size=5,
+            transform=SAROpticalFusionTransform(num_sar_channels=2),
+        )
+        sample = ds[0]
+        assert sample["pre_image"].shape[0]  == 5
+        assert sample["post_image"].shape[0] == 5

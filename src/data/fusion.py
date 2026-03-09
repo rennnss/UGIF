@@ -3,10 +3,16 @@ Optical + SAR fusion utilities.
 
 Implements the channel-wise fusion described in the paper:
     X_fused = O_i ⊕ S_i  ∈ ℝ^{H × W × (Co + Cs)}
+
+With TorchGeo the batch format is image (B, 10, H, W):
+  channels 0-4  = pre  (3 RGB + 2 proxy SAR)
+  channels 5-9  = post (3 RGB + 2 proxy SAR)
+
+split_batch() converts this into the (pre, post) pair expected by SiameseFCN.
 """
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 from torch import Tensor
@@ -16,7 +22,7 @@ def fuse_optical_sar(optical: Tensor, sar: Tensor) -> Tensor:
     """Concatenate optical and SAR tensors along the channel dimension.
 
     Args:
-        optical: ``(C_o, H, W)`` optical image tensor.  
+        optical: ``(C_o, H, W)`` optical image tensor.
         sar:     ``(C_s, H, W)`` SAR image tensor.
 
     Returns:
@@ -33,12 +39,26 @@ def fuse_optical_sar(optical: Tensor, sar: Tensor) -> Tensor:
     return torch.cat([optical, sar], dim=0)
 
 
-class SAROpticalFusionTransform:
-    """Dataset transform that appends synthetic SAR channels to RGB images.
+def split_batch(image: Tensor) -> Tuple[Tensor, Tensor]:
+    """Split a TorchGeo LEVIR-CD batch into (pre, post) tensors for Siamese FCN.
 
-    When real SAR data is unavailable this transform simulates SAR-like
-    texture by converting a greyscale copy of the image into VV and VH
-    proxy channels through simple spectral manipulation.
+    Args:
+        image: ``(B, 10, H, W)`` tensor with layout
+               [pre_rgb(3) + pre_sar(2) + post_rgb(3) + post_sar(2)].
+
+    Returns:
+        Tuple ``(pre, post)`` each of shape ``(B, 5, H, W)``.
+    """
+    pre  = image[:, :5]   # channels 0-4
+    post = image[:, 5:]   # channels 5-9
+    return pre, post
+
+
+class SAROpticalFusionTransform:
+    """Sample-level transform that appends synthetic SAR channels to RGB images.
+
+    Used by the synthetic dataset fallback only.  The TorchGeo datamodule path
+    runs SAR simulation on-GPU inside ``on_after_batch_transfer``.
 
     Args:
         num_sar_channels: Number of synthetic SAR channels to append (default 2).
@@ -48,16 +68,16 @@ class SAROpticalFusionTransform:
         self.num_sar_channels = num_sar_channels
 
     def __call__(self, sample: Dict[str, Tensor]) -> Dict[str, Tensor]:
-        pre = sample["pre_image"]   # (3, H, W)
+        pre  = sample["pre_image"]    # (3, H, W)
         post = sample["post_image"]
 
-        sample["pre_image"] = self._fuse(pre)
+        sample["pre_image"]  = self._fuse(pre)
         sample["post_image"] = self._fuse(post)
         return sample
 
     def _fuse(self, rgb: Tensor) -> Tensor:
         """Append simulated SAR channels to an RGB tensor."""
-        grey = rgb.mean(dim=0, keepdim=True)  # (1, H, W)
-        sar_channels = [grey * (0.8 + 0.2 * i) for i in range(self.num_sar_channels)]
-        sar = torch.cat(sar_channels, dim=0)  # (num_sar_channels, H, W)
+        grey = rgb.mean(dim=0, keepdim=True)   # (1, H, W)
+        sar_channels = [grey * (0.8 - 0.2 * i) for i in range(self.num_sar_channels)]
+        sar = torch.cat(sar_channels, dim=0)   # (num_sar_channels, H, W)
         return fuse_optical_sar(rgb, sar)

@@ -42,6 +42,7 @@ def train(cfg: DictConfig) -> None:
         patch_size=cfg.data.patch_size,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
+        download=cfg.data.get("download", False),
     )
 
     # ── Model ────────────────────────────────────────────────────────

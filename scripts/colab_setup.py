@@ -59,7 +59,9 @@ print(os.listdir(PROJECT_DIR))
     shap \
     geopandas geopy rasterio \
     python-dotenv \
-    spacy
+    spacy \
+    torchgeo \
+    kornia
 
 !python -m spacy download en_core_web_sm -q
 
