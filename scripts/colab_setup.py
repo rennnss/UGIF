@@ -136,8 +136,11 @@ safe_symlink(f"{DRIVE_ROOT}/data",    f"{PROJECT_DIR}/data")
 # ──────────────────────────────────────────────────────────────
 # CELL 9 — Smoke test (2 steps, ~30 sec, no real data needed)
 # ──────────────────────────────────────────────────────────────
-os.chdir(PROJECT_DIR)
-!python src/training/train.py training.fast_dev_run=True
+import subprocess
+subprocess.run(
+    ["python", "src/training/train.py", "training.fast_dev_run=True"],
+    cwd=PROJECT_DIR, check=True
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -148,18 +151,21 @@ os.chdir(PROJECT_DIR)
 #     L4  (Pro):   batch_size=24, patch_size=256
 #     A100(Pro+):  batch_size=32, patch_size=512
 # ──────────────────────────────────────────────────────────────
-os.chdir(PROJECT_DIR)
-!python src/training/train.py \
-    data.root=./data/LEVIR-CD \
-    data.batch_size=16 \
-    data.patch_size=256 \
-    data.num_workers=2 \
-    training.max_epochs=50 \
-    output.dir=./outputs \
-    output.log_dir=./outputs/logs
+import subprocess
+subprocess.run([
+    "python", "src/training/train.py",
+    "data.root=./data/LEVIR-CD",
+    "data.batch_size=16",
+    "data.patch_size=256",
+    "data.num_workers=2",
+    "training.max_epochs=50",
+    "output.dir=./outputs",
+    "output.log_dir=./outputs/logs",
+], cwd=PROJECT_DIR, check=True)
 
 # To RESUME after a session timeout (checkpoint is on Drive):
-# !python src/training/train.py ckpt_path=./outputs/checkpoints/last.ckpt
+# subprocess.run(["python", "src/training/train.py",
+#     "ckpt_path=./outputs/checkpoints/last.ckpt"], cwd=PROJECT_DIR)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -172,9 +178,11 @@ os.chdir(PROJECT_DIR)
 # ──────────────────────────────────────────────────────────────
 # CELL 12 — NL query + DII report
 # ──────────────────────────────────────────────────────────────
-os.chdir(PROJECT_DIR)
-!python src/frontend/llm_agent.py \
-    --query "flood damage in Chennai August 2023" \
-    --geojson
-
-!python src/explainability/report_generator.py
+import subprocess
+subprocess.run([
+    "python", "src/frontend/llm_agent.py",
+    "--query", "flood damage in Chennai August 2023",
+    "--geojson",
+], cwd=PROJECT_DIR)
+subprocess.run(["python", "src/explainability/report_generator.py"],
+               cwd=PROJECT_DIR)
