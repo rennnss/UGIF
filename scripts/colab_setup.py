@@ -121,35 +121,31 @@ print("✅ All imports OK")
 
 
 # ════════════════════════════════════════════════════════════════
-# CELL 5 ─ Download LEVIR-CD+ dataset (~1.5 GB total)
-#   TorchGeo downloads each split automatically. A retry loop
-#   handles Colab's occasional network drops and bad zips.
+# CELL 5 ─ Load dataset from Google Drive
+#
+#   Place levircd_plus.zip anywhere in your Drive, then set
+#   DRIVE_ZIP_PATH below to its location.
+#   Drive is mounted only for this one extraction — all training
+#   runs purely on local /content storage afterwards.
 # ════════════════════════════════════════════════════════════════
-import urllib.error, zipfile, time, glob
+import zipfile
+from google.colab import drive
 
-def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> None:
-    for attempt in range(1, max_retries + 1):
-        try:
-            LEVIRCDPlus(root=root, split=split, download=True)
-            print(f"  [{split}] done ✅")
-            return
-        except (urllib.error.ContentTooShortError, urllib.error.URLError,
-                OSError, zipfile.BadZipFile) as exc:
-            print(f"  [{split}] attempt {attempt}/{max_retries} failed: {type(exc).__name__}")
-            if attempt == max_retries:
-                raise
-            # Purge corrupt/partial files so TorchGeo re-downloads cleanly
-            for f in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
-                os.remove(f)
-            extracted = os.path.join(root, "LEVIR-CD+")
-            if os.path.exists(extracted):
-                shutil.rmtree(extracted)
-            time.sleep(10 * attempt)
+DRIVE_ZIP_PATH = "/content/drive/MyDrive/levircd_plus.zip"  # ← adjust if needed
 
-print("Downloading LEVIR-CD+ …")
-for split in ("train", "test"):   # LEVIRCDPlus has no val split; val is carved from train
-    _download_split_with_retry(split, root=DATA_DIR)
+drive.mount("/content/drive")
 
+print(f"Extracting {DRIVE_ZIP_PATH} → {DATA_DIR} …")
+with zipfile.ZipFile(DRIVE_ZIP_PATH, "r") as z:
+    z.extractall(DATA_DIR)
+print("Extraction complete ✅")
+
+drive.flush_and_unmount()
+print("Drive unmounted — training will run on local storage only.")
+
+# Confirm dataset is in place
+expected = os.path.join(DATA_DIR, "LEVIR-CD+")
+print("Dataset ready:", os.path.exists(expected))
 subprocess.run(["df", "-h", "/content"])
 
 
