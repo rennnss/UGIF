@@ -141,7 +141,7 @@ def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> N
             # Purge corrupt/partial files so TorchGeo re-downloads cleanly
             for f in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
                 os.remove(f)
-            extracted = os.path.join(root, "LEVIRCDPlus")
+            extracted = os.path.join(root, "LEVIR-CD+")
             if os.path.exists(extracted):
                 shutil.rmtree(extracted)
             time.sleep(10 * attempt)
