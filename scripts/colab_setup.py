@@ -165,16 +165,27 @@ def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> N
             LEVIRCDPlus(root=root, split=split, download=True)
             print(f"  [{split}] ready ✅")
             return
-        except (urllib.error.ContentTooShortError, urllib.error.URLError, OSError) as exc:
-            print(f"\n  [{split}] attempt {attempt}/{max_retries} failed: {exc}")
+        except (
+            urllib.error.ContentTooShortError,
+            urllib.error.URLError,
+            OSError,
+            __import__("zipfile").BadZipFile,
+        ) as exc:
+            print(f"\n  [{split}] attempt {attempt}/{max_retries} failed: {type(exc).__name__}: {exc}")
             if attempt == max_retries:
                 raise RuntimeError(
                     f"Failed to download LEVIR-CD+ [{split}] after {max_retries} attempts."
                 ) from exc
-            # Remove partial zips so TorchGeo re-downloads cleanly
+            # ── Purge ALL corrupted/partial artefacts so TorchGeo starts fresh ──
+            # 1. Remove partial or corrupt zip archives
             for partial in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
-                print(f"  Removing partial file: {partial}")
+                print(f"  Removing corrupt/partial zip: {partial}")
                 os.remove(partial)
+            # 2. Remove partially-extracted directories (TorchGeo extracts to root/LEVIRCDPlus/)
+            extracted_dir = os.path.join(root, "LEVIRCDPlus")
+            if os.path.exists(extracted_dir):
+                print(f"  Removing partially-extracted dir: {extracted_dir}")
+                shutil.rmtree(extracted_dir)
             wait = 10 * attempt
             print(f"  Retrying in {wait}s…")
             time.sleep(wait)
