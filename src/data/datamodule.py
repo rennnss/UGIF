@@ -6,12 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms.functional as TF
 import random
 
-from torchgeo.datasets import LEVIRCD
+from torchgeo.datasets import LEVIRCDPlus
 from src.data.fusion import SAROpticalFusionTransform
 from src.data.transforms import get_train_transforms, get_val_transforms, Compose
 
@@ -100,20 +101,21 @@ class UGIFDataModule(pl.LightningDataModule):
         val_tfm   = _compose_with_fusion(get_val_transforms(), self.patch_size, self.num_sar)
 
         if stage in ("fit", None):
-            self.train_dataset = LEVIRCD(
+            # LEVIRCDPlus has no built-in val split — carve 20% off train
+            full_train = LEVIRCDPlus(
                 root=self.root,
                 split="train",
                 transforms=train_tfm,
                 download=True,
             )
-            self.val_dataset = LEVIRCD(
-                root=self.root,
-                split="val",
-                transforms=val_tfm,
-                download=True,
+            val_size   = max(1, int(0.2 * len(full_train)))
+            train_size = len(full_train) - val_size
+            self.train_dataset, self.val_dataset = random_split(
+                full_train, [train_size, val_size],
+                generator=torch.Generator().manual_seed(42),
             )
         if stage in ("test", None):
-            self.test_dataset = LEVIRCD(
+            self.test_dataset = LEVIRCDPlus(
                 root=self.root,
                 split="test",
                 transforms=val_tfm,
