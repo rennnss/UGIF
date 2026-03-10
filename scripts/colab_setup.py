@@ -1,6 +1,9 @@
 """
-UGIF — Google Colab Setup Script (FIXED)
-========================================
+UGIF — Google Colab Setup Script (Local Storage Only)
+======================================================
+All data, checkpoints and logs are kept on Colab's ephemeral /content disk.
+Nothing is written to Google Drive — no mounting required.
+
 Run each numbered cell in order in a Colab notebook.
 Runtime: Runtime → Change runtime type → T4 GPU (free)
 
@@ -8,28 +11,16 @@ Repo: https://github.com/rennnss/UGIF
 """
 
 # ──────────────────────────────────────────────────────────────
-# CELL 1 — Configuration (edit these)
+# CELL 1 — Configuration
 # ──────────────────────────────────────────────────────────────
 REPO_URL    = "https://github.com/rennnss/UGIF.git"
 PROJECT_DIR = "/content/ugif"
-DRIVE_ROOT  = "/content/drive/MyDrive/UGIF"
+DATA_DIR    = f"{PROJECT_DIR}/data"         # LEVIR-CD downloaded here by TorchGeo
+OUTPUT_DIR  = f"{PROJECT_DIR}/outputs"      # checkpoints + logs (local only)
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 2 — Mount Google Drive
-# ──────────────────────────────────────────────────────────────
-from google.colab import drive
-import os
-
-drive.mount('/content/drive')
-os.makedirs(DRIVE_ROOT, exist_ok=True)
-os.makedirs(f"{DRIVE_ROOT}/data", exist_ok=True)
-os.makedirs(f"{DRIVE_ROOT}/outputs", exist_ok=True)
-print("Drive mounted.")
-
-
-# ──────────────────────────────────────────────────────────────
-# CELL 3 — Clone the UGIF project + copernicus_api dependency
+# CELL 2 — Clone the UGIF project
 # ──────────────────────────────────────────────────────────────
 import os, shutil
 
@@ -42,30 +33,41 @@ if os.path.exists(PROJECT_DIR):
 
 os.system(f"git clone {REPO_URL} {PROJECT_DIR}")
 os.makedirs(f"{PROJECT_DIR}/third_party", exist_ok=True)
-os.system(f"git clone https://github.com/armkhudinyan/copernicus_api.git "
-          f"{PROJECT_DIR}/third_party/copernicus_api")
+os.system(
+    f"git clone https://github.com/armkhudinyan/copernicus_api.git "
+    f"{PROJECT_DIR}/third_party/copernicus_api"
+)
+
+# Create local output directories
+os.makedirs(f"{OUTPUT_DIR}/checkpoints", exist_ok=True)
+os.makedirs(f"{OUTPUT_DIR}/logs", exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 print(f"\nProject ready at {PROJECT_DIR}")
 print(os.listdir(PROJECT_DIR))
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 4 — Install dependencies
+# CELL 3 — Install dependencies
 #           (Colab already has torch + CUDA — skip those)
 # ──────────────────────────────────────────────────────────────
-!pip install -q \
-    pytorch-lightning \
-    hydra-core omegaconf \
-    shap \
-    geopandas geopy rasterio \
-    python-dotenv \
-    spacy \
-    torchgeo
+import subprocess, sys
 
-!python -m spacy download en_core_web_sm -q
+subprocess.run([
+    sys.executable, "-m", "pip", "install", "-q",
+    "pytorch-lightning",
+    "hydra-core", "omegaconf",
+    "shap",
+    "geopandas", "geopy", "rasterio",
+    "python-dotenv",
+    "spacy",
+    "torchgeo",
+], check=True)
+
+subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm", "-q"], check=True)
 
 # Install the UGIF project itself so 'src' is importable everywhere
-!pip install -q -e {PROJECT_DIR}
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", PROJECT_DIR], check=True)
 
 import torch
 print(f"\nPyTorch {torch.__version__} | CUDA: {torch.cuda.is_available()}")
@@ -74,103 +76,93 @@ if torch.cuda.is_available():
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 5 — Verify src package imports correctly
+# CELL 4 — Verify imports
 # ──────────────────────────────────────────────────────────────
 import sys
 os.chdir(PROJECT_DIR)
 
-# Now 'src' is a proper installed package — no manual sys.path hacks needed
-from src.data.sar_downloader import SARDownloader      # type: ignore
-from torchgeo.datasets import LEVIRCDPlus              # type: ignore
-from src.models.siamese import SiameseFCN              # type: ignore
-from src.explainability.dii import compute_dii_improved# type: ignore
+from src.data.sar_downloader import SARDownloader       # type: ignore
+from torchgeo.datasets import LEVIRCDPlus               # type: ignore
+from src.models.siamese import SiameseFCN               # type: ignore
+from src.explainability.dii import compute_dii_improved # type: ignore
 
 print("✅ All UGIF imports OK")
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 6 — Set Copernicus credentials
+# CELL 5 — (Optional) Set Copernicus credentials for SAR download
 #           Use Colab's built-in Secrets (left sidebar → 🔑)
 #           Add: COPERNICUS_USER and COPERNICUS_PASS
+#           Skip this cell if you are only using LEVIR-CD (no real SAR needed).
 # ──────────────────────────────────────────────────────────────
-from google.colab import userdata
-
-os.environ['COPERNICUS_USER'] = userdata.get('COPERNICUS_USER')
-os.environ['COPERNICUS_PASS'] = userdata.get('COPERNICUS_PASS')
-print("Credentials loaded from Colab Secrets ✅")
+try:
+    from google.colab import userdata
+    os.environ['COPERNICUS_USER'] = userdata.get('COPERNICUS_USER')
+    os.environ['COPERNICUS_PASS'] = userdata.get('COPERNICUS_PASS')
+    print("Credentials loaded from Colab Secrets ✅")
+except Exception as e:
+    print(f"Skipping Copernicus credentials: {e}")
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 7 — Download Sentinel-1 SAR data
-#           Data saved to Drive so it persists after session ends.
+# CELL 6 — Smoke test (1 batch, ~30 sec — confirms everything wires up)
 # ──────────────────────────────────────────────────────────────
-SAR_OUT = f"{DRIVE_ROOT}/data/SAR/area_2023"
-os.makedirs(SAR_OUT, exist_ok=True)
-
-dl = SARDownloader()  # picks up env vars set above
-dl.download(
-    bbox=(80.0, 12.0, 81.0, 13.5),   # ← change to your area of interest
-    start_date="2023-08-01",
-    end_date="2023-08-31",
-    out_dir=SAR_OUT,
-    prod_type="GRD",
-    # orbit_direction="ASCENDING",  # uncomment to filter by orbit once download works
-    max_products=5,
+os.system(
+    f"cd {PROJECT_DIR} && python src/training/train.py "
+    f"training.fast_dev_run=True "
+    f"data.root={DATA_DIR} "
+    f"output.dir={OUTPUT_DIR} "
+    f"output.log_dir={OUTPUT_DIR}/logs"
 )
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 8 — Symlink Drive directories into project
-#           Checkpoints + data persist between Colab sessions.
-# ──────────────────────────────────────────────────────────────
-def safe_symlink(src, dst):
-    if not os.path.exists(dst):
-        os.symlink(src, dst)
-        print(f"Linked {dst} → {src}")
-    else:
-        print(f"Already exists: {dst}")
-
-safe_symlink(f"{DRIVE_ROOT}/outputs", f"{PROJECT_DIR}/outputs")
-safe_symlink(f"{DRIVE_ROOT}/data",    f"{PROJECT_DIR}/data")
-
-
-# ──────────────────────────────────────────────────────────────
-# CELL 9 — Smoke test (2 steps, ~30 sec, no real data needed)
-# ──────────────────────────────────────────────────────────────
-!cd /content/ugif && python src/training/train.py training.fast_dev_run=True
-
-
-# ──────────────────────────────────────────────────────────────
-# CELL 10 — Full training
+# CELL 7 — Full training (50 epochs)
+#
+#   NOTE: TorchGeo will automatically download LEVIR-CD+ (~700 MB)
+#         into DATA_DIR on first run.
 #
 #   GPU presets (data.num_workers=2 keeps Colab stable):
-#     T4  (free):  batch_size=16, patch_size=256
-#     L4  (Pro):   batch_size=24, patch_size=256
+#     T4  (free):  batch_size=8,  patch_size=256
+#     L4  (Pro):   batch_size=16, patch_size=256
 #     A100(Pro+):  batch_size=32, patch_size=512
 # ──────────────────────────────────────────────────────────────
-!cd /content/ugif && python src/training/train.py \
-    data.root=./data/LEVIR-CD \
-    data.batch_size=16 \
-    data.patch_size=256 \
-    data.num_workers=2 \
-    training.max_epochs=50 \
-    output.dir=./outputs \
-    output.log_dir=./outputs/logs
+os.system(
+    f"cd {PROJECT_DIR} && python src/training/train.py "
+    f"data.root={DATA_DIR} "
+    f"data.batch_size=8 "
+    f"data.patch_size=256 "
+    f"data.num_workers=2 "
+    f"training.max_epochs=50 "
+    f"training.patience=0 "
+    f"output.dir={OUTPUT_DIR} "
+    f"output.log_dir={OUTPUT_DIR}/logs"
+)
 
-# To RESUME after a session timeout:
-# !cd /content/ugif && python src/training/train.py ckpt_path=./outputs/checkpoints/last.ckpt
+# ── RESUME after a session timeout (ckpt saved to local disk) ──
+# os.system(
+#     f"cd {PROJECT_DIR} && python src/training/train.py "
+#     f"data.root={DATA_DIR} "
+#     f"data.num_workers=2 "
+#     f"training.max_epochs=50 "
+#     f"ckpt_path={OUTPUT_DIR}/checkpoints/last.ckpt "
+#     f"output.dir={OUTPUT_DIR} "
+#     f"output.log_dir={OUTPUT_DIR}/logs"
+# )
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 11 — TensorBoard (inline in Colab)
+# CELL 8 — TensorBoard (inline in Colab)
 # ──────────────────────────────────────────────────────────────
 # %load_ext tensorboard
-# %tensorboard --logdir {PROJECT_DIR}/outputs/logs
+# %tensorboard --logdir /content/ugif/outputs/logs
 
 
 # ──────────────────────────────────────────────────────────────
-# CELL 12 — NL query + DII report
+# CELL 9 — NL query + DII explainability report
 # ──────────────────────────────────────────────────────────────
-!cd /content/ugif && python src/frontend/llm_agent.py \
-    --query "flood damage in Chennai August 2023" --geojson
-!cd /content/ugif && python src/explainability/report_generator.py
+os.system(
+    f"cd {PROJECT_DIR} && python src/frontend/llm_agent.py "
+    f"--query \"flood damage in Chennai August 2023\" --geojson"
+)
+os.system(f"cd {PROJECT_DIR} && python src/explainability/report_generator.py")
