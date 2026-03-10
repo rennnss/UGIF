@@ -1,168 +1,300 @@
 """
-UGIF — Google Colab Setup Script (Local Storage Only)
-======================================================
-All data, checkpoints and logs are kept on Colab's ephemeral /content disk.
-Nothing is written to Google Drive — no mounting required.
+UGIF — Google Colab Training Script
+=====================================
+INSTRUCTIONS
+  1. Open a new Colab notebook: https://colab.research.google.com
+  2. Runtime → Change runtime type → T4 GPU
+  3. Copy each CELL block below into its own Colab cell, then run top-to-bottom.
+     (Or: File → Upload notebook and paste all cells at once.)
 
-Run each numbered cell in order in a Colab notebook.
-Runtime: Runtime → Change runtime type → T4 GPU (free)
+STORAGE NOTE:
+  Everything lives on Colab's /content disk (~78 GB free).
+  Google Drive is NOT required.
 
-Repo: https://github.com/rennnss/UGIF
+DATASET:
+  TorchGeo will automatically download LEVIR-CD+ (~1.5 GB) on the first
+  training run. It contains 985 pairs of 1024×1024 RGB bitemporal images
+  (train/val/test splits), fully sufficient for high-quality training.
+
+EXPECTED RUNTIME (T4 GPU):
+  ~25 min per epoch × 50 epochs ≈ ~20 hours total.
+  Use "Resume" cell to continue after a session timeout.
 """
 
-# ──────────────────────────────────────────────────────────────
-# CELL 1 — Configuration
-# ──────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# CELL 1 ─ Check GPU + disk space
+# ════════════════════════════════════════════════════════════════
+import subprocess, sys, os, shutil
+
+result = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+print(result.stdout or "No GPU found — switch runtime to GPU!")
+
+# Show available disk space
+subprocess.run(["df", "-h", "/content"], check=True)
+
+
+# ════════════════════════════════════════════════════════════════
+# CELL 2 ─ Clone UGIF repo
+# ════════════════════════════════════════════════════════════════
 REPO_URL    = "https://github.com/rennnss/UGIF.git"
 PROJECT_DIR = "/content/ugif"
-DATA_DIR    = f"{PROJECT_DIR}/data"         # LEVIR-CD downloaded here by TorchGeo
-OUTPUT_DIR  = f"{PROJECT_DIR}/outputs"      # checkpoints + logs (local only)
+DATA_DIR    = "/content/data"       # LEVIR-CD+ lives here (~1.5 GB)
+OUTPUT_DIR  = "/content/outputs"   # checkpoints + TensorBoard logs
 
+os.chdir("/content")
 
-# ──────────────────────────────────────────────────────────────
-# CELL 2 — Clone the UGIF project
-# ──────────────────────────────────────────────────────────────
-import os, shutil
-
-# Reset cwd — Colab shell can get stuck in a deleted directory
-os.chdir('/content')
-
-# Clean up any partial clone from a previous failed attempt
+# Fresh clone every time to pick up latest code
 if os.path.exists(PROJECT_DIR):
     shutil.rmtree(PROJECT_DIR)
+os.system(f"git clone --depth 1 {REPO_URL} {PROJECT_DIR}")
 
-os.system(f"git clone {REPO_URL} {PROJECT_DIR}")
+# Optional: copernicus_api for real SAR downloads
 os.makedirs(f"{PROJECT_DIR}/third_party", exist_ok=True)
 os.system(
-    f"git clone https://github.com/armkhudinyan/copernicus_api.git "
+    "git clone --depth 1 "
+    "https://github.com/armkhudinyan/copernicus_api.git "
     f"{PROJECT_DIR}/third_party/copernicus_api"
 )
 
-# Create local output directories
-os.makedirs(f"{OUTPUT_DIR}/checkpoints", exist_ok=True)
-os.makedirs(f"{OUTPUT_DIR}/logs", exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
+# Create output directories
+for d in [DATA_DIR, f"{OUTPUT_DIR}/checkpoints", f"{OUTPUT_DIR}/logs"]:
+    os.makedirs(d, exist_ok=True)
 
-print(f"\nProject ready at {PROJECT_DIR}")
-print(os.listdir(PROJECT_DIR))
+print("\n✅ Repo cloned")
+print("Contents:", os.listdir(PROJECT_DIR))
 
 
-# ──────────────────────────────────────────────────────────────
-# CELL 3 — Install dependencies
-#           (Colab already has torch + CUDA — skip those)
-# ──────────────────────────────────────────────────────────────
-import subprocess, sys
-
-subprocess.run([
-    sys.executable, "-m", "pip", "install", "-q",
-    "pytorch-lightning",
+# ════════════════════════════════════════════════════════════════
+# CELL 3 ─ Install Python dependencies
+#           Colab ships with PyTorch + CUDA already — skip those.
+# ════════════════════════════════════════════════════════════════
+packages = [
+    "pytorch-lightning>=2.0",
     "hydra-core", "omegaconf",
+    "torchgeo>=0.5",           # LEVIR-CD+ dataset + data utilities
     "shap",
-    "geopandas", "geopy", "rasterio",
+    "geopandas", "geopy",
+    "rasterio",
     "python-dotenv",
     "spacy",
-    "torchgeo",
-], check=True)
+]
+subprocess.run(
+    [sys.executable, "-m", "pip", "install", "-q", "--upgrade"] + packages,
+    check=True,
+)
 
-subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm", "-q"], check=True)
+# Language model for the NL query interface
+subprocess.run(
+    [sys.executable, "-m", "spacy", "download", "en_core_web_sm", "-q"],
+    check=True,
+)
 
-# Install the UGIF project itself so 'src' is importable everywhere
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", PROJECT_DIR], check=True)
+# Install the UGIF project in editable mode so `src.*` is importable
+subprocess.run(
+    [sys.executable, "-m", "pip", "install", "-q", "-e", PROJECT_DIR],
+    check=True,
+)
 
 import torch
-print(f"\nPyTorch {torch.__version__} | CUDA: {torch.cuda.is_available()}")
+print(f"\nPyTorch  : {torch.__version__}")
+print(f"CUDA     : {torch.cuda.is_available()}")
 if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"GPU      : {torch.cuda.get_device_name(0)}")
+    print(f"VRAM     : {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
 
-# ──────────────────────────────────────────────────────────────
-# CELL 4 — Verify imports
-# ──────────────────────────────────────────────────────────────
-import sys
+# ════════════════════════════════════════════════════════════════
+# CELL 4 ─ Verify imports (fast sanity check)
+# ════════════════════════════════════════════════════════════════
 os.chdir(PROJECT_DIR)
+sys.path.insert(0, PROJECT_DIR)
 
-from src.data.sar_downloader import SARDownloader       # type: ignore
-from torchgeo.datasets import LEVIRCDPlus               # type: ignore
-from src.models.siamese import SiameseFCN               # type: ignore
-from src.explainability.dii import compute_dii_improved # type: ignore
+# Core project modules
+from src.data.datamodule    import UGIFDataModule         # type: ignore
+from src.training.lightning_module import UGIFLightningModule  # type: ignore
+from src.models.siamese     import SiameseFCN             # type: ignore
 
-print("✅ All UGIF imports OK")
+# TorchGeo dataset (the actual data source)
+from torchgeo.datasets      import LEVIRCDPlus            # type: ignore
 
-
-# ──────────────────────────────────────────────────────────────
-# CELL 5 — (Optional) Set Copernicus credentials for SAR download
-#           Use Colab's built-in Secrets (left sidebar → 🔑)
-#           Add: COPERNICUS_USER and COPERNICUS_PASS
-#           Skip this cell if you are only using LEVIR-CD (no real SAR needed).
-# ──────────────────────────────────────────────────────────────
-try:
-    from google.colab import userdata
-    os.environ['COPERNICUS_USER'] = userdata.get('COPERNICUS_USER')
-    os.environ['COPERNICUS_PASS'] = userdata.get('COPERNICUS_PASS')
-    print("Credentials loaded from Colab Secrets ✅")
-except Exception as e:
-    print(f"Skipping Copernicus credentials: {e}")
+print("✅ All imports OK")
 
 
-# ──────────────────────────────────────────────────────────────
-# CELL 6 — Smoke test (1 batch, ~30 sec — confirms everything wires up)
-# ──────────────────────────────────────────────────────────────
-os.system(
-    f"cd {PROJECT_DIR} && python src/training/train.py "
-    f"training.fast_dev_run=True "
-    f"data.root={DATA_DIR} "
-    f"output.dir={OUTPUT_DIR} "
-    f"output.log_dir={OUTPUT_DIR}/logs"
+# ════════════════════════════════════════════════════════════════
+# CELL 5 ─ Pre-download LEVIR-CD+ dataset
+#   TorchGeo handles the download automatically, but running it
+#   here explicitly shows progress and lets you confirm disk space
+#   before starting the 50-epoch training run.
+#
+#   Size on disk:
+#     train : ~1.1 GB   (726 image pairs)
+#     val   :  ~90 MB   (64  image pairs)
+#     test  : ~130 MB   (195 image pairs)
+#     total : ~1.5 GB
+# ════════════════════════════════════════════════════════════════
+print("Downloading LEVIR-CD+ (this takes ~5-10 min on a fresh Colab session)…")
+for split in ("train", "val", "test"):
+    LEVIRCDPlus(root=DATA_DIR, split=split, download=True)
+    print(f"  [{split}] ready ✅")
+
+# Confirm disk usage after download
+subprocess.run(["du", "-sh", DATA_DIR])
+subprocess.run(["df", "-h", "/content"])
+
+
+# ════════════════════════════════════════════════════════════════
+# CELL 6 ─ Smoke test  (~30 seconds, 2 mini-batches, no real data needed)
+#   Proves the full pipeline wires up before committing to 50 epochs.
+# ════════════════════════════════════════════════════════════════
+import pytorch_lightning as pl
+from src.training.callbacks import get_callbacks           # type: ignore
+
+pl.seed_everything(42, workers=True)
+
+dm_smoke = UGIFDataModule(
+    root=DATA_DIR,
+    patch_size=256,
+    batch_size=4,
+    num_workers=2,
+)
+model_smoke = UGIFLightningModule(
+    in_channels=5,    # 3 RGB optical + 2 synthetic SAR
+    num_features=4,
+    max_epochs=1,
+)
+trainer_smoke = pl.Trainer(
+    max_epochs=1,
+    limit_train_batches=2,
+    limit_val_batches=2,
+    accelerator="auto",
+    devices="auto",
+    enable_progress_bar=True,
+    logger=False,
+    enable_checkpointing=False,
+)
+trainer_smoke.fit(model_smoke, datamodule=dm_smoke)
+print("\n✅ Smoke test passed — pipeline is wired up correctly")
+
+del dm_smoke, model_smoke, trainer_smoke   # free memory
+
+
+# ════════════════════════════════════════════════════════════════
+# CELL 7 ─ Full training  (50 epochs, Optical + synthetic SAR)
+#
+#   Batch-size guide for free T4 (15 GB VRAM):
+#     patch_size=256 → batch_size=8   (safe, recommended)
+#     patch_size=256 → batch_size=16  (may OOM on larger backbones)
+#
+#   Early stopping is OFF (patience=0) so all 50 epochs always run.
+#   Best checkpoint is saved; 'last.ckpt' is kept for resuming.
+# ════════════════════════════════════════════════════════════════
+MAX_EPOCHS  = 50
+BATCH_SIZE  = 8
+PATCH_SIZE  = 256
+NUM_WORKERS = 2
+IN_CHANNELS = 5    # 3 optical RGB + 2 synthetic SAR (VV / VH proxy)
+
+pl.seed_everything(42, workers=True)
+
+dm = UGIFDataModule(
+    root=DATA_DIR,
+    patch_size=PATCH_SIZE,
+    batch_size=BATCH_SIZE,
+    num_workers=NUM_WORKERS,
+)
+model = UGIFLightningModule(
+    in_channels=IN_CHANNELS,
+    num_features=4,
+    feature_dim=128,
+    r_max=10.0,
+    epsilon=1e-6,
+    lr=1e-4,
+    weight_decay=1e-5,
+    margin=1.0,
+    max_epochs=MAX_EPOCHS,
+    lambda_csn=0.3,
+)
+callbacks = get_callbacks(
+    output_dir=OUTPUT_DIR,
+    patience=0,           # early stopping DISABLED — run all epochs
+)
+trainer = pl.Trainer(
+    max_epochs=MAX_EPOCHS,
+    callbacks=callbacks,
+    logger=pl.loggers.TensorBoardLogger(
+        save_dir=f"{OUTPUT_DIR}/logs",
+        name="ugif",
+    ),
+    accelerator="auto",
+    devices="auto",
+    precision="16-mixed",   # AMP halves VRAM use and speeds up T4
+    deterministic=False,    # deterministic=True is slow on GPU; off for speed
+    enable_progress_bar=True,
+    log_every_n_steps=10,
 )
 
+print(f"\n🚀 Starting training: {MAX_EPOCHS} epochs | batch={BATCH_SIZE} | patch={PATCH_SIZE}")
+trainer.fit(model, datamodule=dm)
 
-# ──────────────────────────────────────────────────────────────
-# CELL 7 — Full training (50 epochs)
-#
-#   NOTE: TorchGeo will automatically download LEVIR-CD+ (~700 MB)
-#         into DATA_DIR on first run.
-#
-#   GPU presets (data.num_workers=2 keeps Colab stable):
-#     T4  (free):  batch_size=8,  patch_size=256
-#     L4  (Pro):   batch_size=16, patch_size=256
-#     A100(Pro+):  batch_size=32, patch_size=512
-# ──────────────────────────────────────────────────────────────
-os.system(
-    f"cd {PROJECT_DIR} && python src/training/train.py "
-    f"data.root={DATA_DIR} "
-    f"data.batch_size=8 "
-    f"data.patch_size=256 "
-    f"data.num_workers=2 "
-    f"training.max_epochs=50 "
-    f"training.patience=0 "
-    f"output.dir={OUTPUT_DIR} "
-    f"output.log_dir={OUTPUT_DIR}/logs"
-)
+print("\n✅ Training complete — running test evaluation on best checkpoint…")
+trainer.test(model, datamodule=dm, ckpt_path="best")
 
-# ── RESUME after a session timeout (ckpt saved to local disk) ──
-# os.system(
-#     f"cd {PROJECT_DIR} && python src/training/train.py "
-#     f"data.root={DATA_DIR} "
-#     f"data.num_workers=2 "
-#     f"training.max_epochs=50 "
-#     f"ckpt_path={OUTPUT_DIR}/checkpoints/last.ckpt "
-#     f"output.dir={OUTPUT_DIR} "
-#     f"output.log_dir={OUTPUT_DIR}/logs"
+
+# ════════════════════════════════════════════════════════════════
+# CELL 8 ─ Resume after a Colab session timeout
+#   Run ONLY this cell (after re-running CELL 1-4 to restore the
+#   environment) to pick up from the last saved checkpoint.
+# ════════════════════════════════════════════════════════════════
+# LAST_CKPT = f"{OUTPUT_DIR}/checkpoints/last.ckpt"
+#
+# pl.seed_everything(42, workers=True)
+# dm = UGIFDataModule(root=DATA_DIR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
+# model = UGIFLightningModule.load_from_checkpoint(LAST_CKPT)
+# callbacks = get_callbacks(output_dir=OUTPUT_DIR, patience=0)
+# trainer = pl.Trainer(
+#     max_epochs=MAX_EPOCHS,
+#     callbacks=callbacks,
+#     logger=pl.loggers.TensorBoardLogger(save_dir=f"{OUTPUT_DIR}/logs", name="ugif"),
+#     accelerator="auto", devices="auto", precision="16-mixed",
 # )
+# trainer.fit(model, datamodule=dm, ckpt_path=LAST_CKPT)
+# trainer.test(model, datamodule=dm, ckpt_path="best")
 
 
-# ──────────────────────────────────────────────────────────────
-# CELL 8 — TensorBoard (inline in Colab)
-# ──────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# CELL 9 ─ TensorBoard (inline)
+# ════════════════════════════════════════════════════════════════
 # %load_ext tensorboard
-# %tensorboard --logdir /content/ugif/outputs/logs
+# %tensorboard --logdir /content/outputs/logs
 
 
-# ──────────────────────────────────────────────────────────────
-# CELL 9 — NL query + DII explainability report
-# ──────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# CELL 10 ─ Show training metrics summary
+# ════════════════════════════════════════════════════════════════
+import glob
+import csv
+
+log_files = sorted(glob.glob(f"{OUTPUT_DIR}/logs/ugif/version_*/metrics.csv"))
+if log_files:
+    with open(log_files[-1]) as f:
+        rows = list(csv.DictReader(f))
+    # Print final epoch metrics
+    val_rows = [r for r in rows if r.get("val_iou")]
+    if val_rows:
+        last = val_rows[-1]
+        print(f"\n{'─'*40}")
+        print(f"  Final val IoU  : {float(last['val_iou']):.4f}")
+        print(f"  Final val Loss : {float(last.get('val_loss', 0)):.4f}")
+        print(f"{'─'*40}")
+else:
+    print("No metrics.csv found yet — training may not have completed.")
+
+
+# ════════════════════════════════════════════════════════════════
+# CELL 11 ─ NL query + DII explainability report (optional)
+# ════════════════════════════════════════════════════════════════
 os.system(
     f"cd {PROJECT_DIR} && python src/frontend/llm_agent.py "
-    f"--query \"flood damage in Chennai August 2023\" --geojson"
+    '--query "flood damage in Chennai August 2023" --geojson'
 )
 os.system(f"cd {PROJECT_DIR} && python src/explainability/report_generator.py")
