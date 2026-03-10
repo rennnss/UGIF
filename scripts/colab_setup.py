@@ -115,7 +115,7 @@ from src.training.lightning_module import UGIFLightningModule  # type: ignore
 from src.models.siamese     import SiameseFCN             # type: ignore
 
 # TorchGeo dataset (the actual data source)
-from torchgeo.datasets      import LEVIRCDPlus            # type: ignore
+from torchgeo.datasets import LEVIRCD               # type: ignore
 
 print("✅ All imports OK")
 
@@ -130,7 +130,7 @@ import urllib.error, zipfile, time, glob
 def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> None:
     for attempt in range(1, max_retries + 1):
         try:
-            LEVIRCDPlus(root=root, split=split, download=True)
+            LEVIRCD(root=root, split=split, download=True)
             print(f"  [{split}] done ✅")
             return
         except (urllib.error.ContentTooShortError, urllib.error.URLError,
