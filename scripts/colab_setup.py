@@ -121,84 +121,35 @@ print("✅ All imports OK")
 
 
 # ════════════════════════════════════════════════════════════════
-# CELL 5 ─ Pre-download LEVIR-CD+ dataset
-#   TorchGeo will auto-download the dataset. A tqdm progress bar
-#   is injected by patching urllib.request.urlretrieve (which
-#   TorchGeo calls internally for every file).
-#
-#   Size on disk:
-#     train : ~1.1 GB   (726 image pairs)
-#     val   :  ~90 MB   (64  image pairs)
-#     test  : ~130 MB   (195 image pairs)
-#     total : ~1.5 GB
+# CELL 5 ─ Download LEVIR-CD+ dataset (~1.5 GB total)
+#   TorchGeo downloads each split automatically. A retry loop
+#   handles Colab's occasional network drops and bad zips.
 # ════════════════════════════════════════════════════════════════
-import urllib.error
-import urllib.request
-import time
-import glob
-from tqdm.auto import tqdm
-
-# ── Inject tqdm progress bar into TorchGeo's downloader ─────────
-_original_urlretrieve = urllib.request.urlretrieve
-
-def _urlretrieve_with_progress(url, filename=None, reporthook=None, data=None):
-    """urlretrieve replacement that shows a tqdm progress bar."""
-    fname = os.path.basename(filename or url.split("/")[-1])
-    with tqdm(
-        unit="B", unit_scale=True, unit_divisor=1024,
-        miniters=1, desc=f"  ⬇  {fname}", colour="cyan",
-        dynamic_ncols=True,
-    ) as bar:
-        def _hook(block_num, block_size, total_size):
-            if total_size and bar.total is None:
-                bar.total = total_size
-            bar.update(block_size)
-        return _original_urlretrieve(url, filename, _hook, data)
-
-urllib.request.urlretrieve = _urlretrieve_with_progress
-# ────────────────────────────────────────────────────────────────
+import urllib.error, zipfile, time, glob
 
 def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> None:
-    """Download one LEVIR-CD+ split, retrying on network failures."""
     for attempt in range(1, max_retries + 1):
         try:
             LEVIRCDPlus(root=root, split=split, download=True)
-            print(f"  [{split}] ready ✅")
+            print(f"  [{split}] done ✅")
             return
-        except (
-            urllib.error.ContentTooShortError,
-            urllib.error.URLError,
-            OSError,
-            __import__("zipfile").BadZipFile,
-        ) as exc:
-            print(f"\n  [{split}] attempt {attempt}/{max_retries} failed: {type(exc).__name__}: {exc}")
+        except (urllib.error.ContentTooShortError, urllib.error.URLError,
+                OSError, zipfile.BadZipFile) as exc:
+            print(f"  [{split}] attempt {attempt}/{max_retries} failed: {type(exc).__name__}")
             if attempt == max_retries:
-                raise RuntimeError(
-                    f"Failed to download LEVIR-CD+ [{split}] after {max_retries} attempts."
-                ) from exc
-            # ── Purge ALL corrupted/partial artefacts so TorchGeo starts fresh ──
-            # 1. Remove partial or corrupt zip archives
-            for partial in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
-                print(f"  Removing corrupt/partial zip: {partial}")
-                os.remove(partial)
-            # 2. Remove partially-extracted directories (TorchGeo extracts to root/LEVIRCDPlus/)
-            extracted_dir = os.path.join(root, "LEVIRCDPlus")
-            if os.path.exists(extracted_dir):
-                print(f"  Removing partially-extracted dir: {extracted_dir}")
-                shutil.rmtree(extracted_dir)
-            wait = 10 * attempt
-            print(f"  Retrying in {wait}s…")
-            time.sleep(wait)
+                raise
+            # Purge corrupt/partial files so TorchGeo re-downloads cleanly
+            for f in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
+                os.remove(f)
+            extracted = os.path.join(root, "LEVIRCDPlus")
+            if os.path.exists(extracted):
+                shutil.rmtree(extracted)
+            time.sleep(10 * attempt)
 
-print("Downloading LEVIR-CD+ (this takes ~5-10 min on a fresh Colab session)…")
+print("Downloading LEVIR-CD+ …")
 for split in ("train", "val", "test"):
     _download_split_with_retry(split, root=DATA_DIR)
 
-# Restore original urlretrieve so nothing else is affected
-urllib.request.urlretrieve = _original_urlretrieve
-
-# Confirm disk usage after download
-subprocess.run(["du", "-sh", DATA_DIR])
 subprocess.run(["df", "-h", "/content"])
 
 
