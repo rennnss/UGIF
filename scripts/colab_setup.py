@@ -132,10 +132,38 @@ print("✅ All imports OK")
 #     test  : ~130 MB   (195 image pairs)
 #     total : ~1.5 GB
 # ════════════════════════════════════════════════════════════════
+# ────────────────────────────────────────────────────────────────
+# Colab's network can drop mid-download for large files.
+# This helper cleans up partial files and retries automatically.
+# ────────────────────────────────────────────────────────────────
+import urllib.error
+import time
+import glob
+
+def _download_split_with_retry(split: str, root: str, max_retries: int = 6) -> None:
+    """Download one LEVIR-CD+ split, retrying on network failures."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            LEVIRCDPlus(root=root, split=split, download=True)
+            print(f"  [{split}] ready ✅")
+            return
+        except (urllib.error.ContentTooShortError, urllib.error.URLError, OSError) as exc:
+            print(f"  [{split}] attempt {attempt}/{max_retries} failed: {exc}")
+            if attempt == max_retries:
+                raise RuntimeError(
+                    f"Failed to download LEVIR-CD+ [{split}] after {max_retries} attempts."
+                ) from exc
+            # Remove any partially downloaded zip files so TorchGeo re-downloads cleanly
+            for partial in glob.glob(os.path.join(root, "**", "*.zip"), recursive=True):
+                print(f"  Removing partial file: {partial}")
+                os.remove(partial)
+            wait = 10 * attempt
+            print(f"  Retrying in {wait}s…")
+            time.sleep(wait)
+
 print("Downloading LEVIR-CD+ (this takes ~5-10 min on a fresh Colab session)…")
 for split in ("train", "val", "test"):
-    LEVIRCDPlus(root=DATA_DIR, split=split, download=True)
-    print(f"  [{split}] ready ✅")
+    _download_split_with_retry(split, root=DATA_DIR)
 
 # Confirm disk usage after download
 subprocess.run(["du", "-sh", DATA_DIR])
@@ -228,7 +256,7 @@ trainer = pl.Trainer(
     accelerator="auto",
     devices="auto",
     precision="16-mixed",   # AMP halves VRAM use and speeds up T4
-    deterministic=False,    # deterministic=True is slow on GPU; off for speed
+    deterministic=True,    # deterministic=True is slow on GPU; off for speed
     enable_progress_bar=True,
     log_every_n_steps=10,
 )
