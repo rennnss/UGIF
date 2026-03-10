@@ -5,20 +5,15 @@ INSTRUCTIONS
   1. Open a new Colab notebook: https://colab.research.google.com
   2. Runtime → Change runtime type → T4 GPU
   3. Copy each CELL block below into its own Colab cell, then run top-to-bottom.
-     (Or: File → Upload notebook and paste all cells at once.)
-
-STORAGE NOTE:
-  Everything lives on Colab's /content disk (~78 GB free).
-  Google Drive is NOT required.
 
 DATASET:
-  TorchGeo will automatically download LEVIR-CD+ (~1.5 GB) on the first
-  training run. It contains 985 pairs of 1024×1024 RGB bitemporal images
-  (train/val/test splits), fully sufficient for high-quality training.
+  Upload levircd_plus.zip to your Google Drive. Cell 5 mounts Drive,
+  extracts the dataset to local /content/data, then unmounts Drive.
+  All training runs on local /content storage — Drive is not kept mounted.
 
 EXPECTED RUNTIME (T4 GPU):
   ~25 min per epoch × 50 epochs ≈ ~20 hours total.
-  Use "Resume" cell to continue after a session timeout.
+  Use the Resume cell (Cell 8) to continue after a session timeout.
 """
 
 # ════════════════════════════════════════════════════════════════
@@ -235,7 +230,7 @@ trainer = pl.Trainer(
     accelerator="auto",
     devices="auto",
     precision="16-mixed",   # AMP halves VRAM use and speeds up T4
-    deterministic=True,    # deterministic=True is slow on GPU; off for speed
+    deterministic=False,   # deterministic=True is very slow on GPU; keep off for speed
     enable_progress_bar=True,
     log_every_n_steps=10,
 )
@@ -252,10 +247,14 @@ trainer.test(model, datamodule=dm, ckpt_path="best")
 #   Run ONLY this cell (after re-running CELL 1-4 to restore the
 #   environment) to pick up from the last saved checkpoint.
 # ════════════════════════════════════════════════════════════════
-# LAST_CKPT = f"{OUTPUT_DIR}/checkpoints/last.ckpt"
+# LAST_CKPT  = f"{OUTPUT_DIR}/checkpoints/last.ckpt"
+# DATA_DIR    = "/content/data"
+# PATCH_SIZE  = 256
+# BATCH_SIZE  = 8
+# MAX_EPOCHS  = 50
 #
 # pl.seed_everything(42, workers=True)
-# dm = UGIFDataModule(root=DATA_DIR, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS)
+# dm = UGIFDataModule(root=DATA_DIR, patch_size=PATCH_SIZE, batch_size=BATCH_SIZE, num_workers=2)
 # model = UGIFLightningModule.load_from_checkpoint(LAST_CKPT)
 # callbacks = get_callbacks(output_dir=OUTPUT_DIR, patience=0)
 # trainer = pl.Trainer(
