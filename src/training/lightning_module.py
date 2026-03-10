@@ -79,9 +79,10 @@ class UGIFLightningModule(pl.LightningModule):
         mask = batch["mask"]        # (B, 1, H, W)  values in {0, 1}
 
         # ── Patch-level change label ─────────────────────────────────
-        # A patch is "changed" if >5% of its pixels are labelled changed.
-        # mask shape: (B, 1, H, W) — collapse all non-batch dims correctly.
-        change_label = (mask.float().mean(dim=(1, 2, 3)) > 0.05).float()  # (B,)
+        # A patch is "changed" if >0.5% of its pixels are changed.
+        # LEVIR-CD+ has ~1.26% changed pixels overall — using 5% would
+        # label almost every patch as no-change and cause IoU collapse.
+        change_label = (mask.float().mean(dim=(1, 2, 3)) > 0.005).float()  # (B,)
 
         # ── Forward pass ────────────────────────────────────────────
         out = self.model(pre, post)   # SiameseOutput

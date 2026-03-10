@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 import torchvision.transforms.functional as TF
 import random
 
@@ -34,13 +34,9 @@ class TorchGeoAdapterTransform:
         
         mask = sample["mask"]
 
-        # Ensure correct type and scale
-        pre_image = pre_image.float()
-        if pre_image.max() > 1.0:
-            pre_image /= 255.0
-        post_image = post_image.float()
-        if post_image.max() > 1.0:
-            post_image /= 255.0
+        # Always normalize to [0, 1] — TorchGeo returns float32 in 0-255 range
+        pre_image  = pre_image.float()  / 255.0
+        post_image = post_image.float() / 255.0
             
         mask = mask.float()
         if mask.max() > 1.0:
@@ -115,7 +111,8 @@ class UGIFDataModule(pl.LightningDataModule):
             train_indices = perm[:train_size]
             val_indices   = perm[train_size:]
 
-            # Wrap with correct transforms via Subset over separately-transformed datasets
+            from torch.utils.data import Subset
+
             train_ds = LEVIRCDPlus(root=self.root, split="train", transforms=train_tfm, download=True)
             val_ds   = LEVIRCDPlus(root=self.root, split="train", transforms=val_tfm,   download=True)
 
