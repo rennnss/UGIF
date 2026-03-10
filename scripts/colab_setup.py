@@ -145,6 +145,29 @@ subprocess.run(["df", "-h", "/content"])
 
 
 # ════════════════════════════════════════════════════════════════
+# CELL 5b ─ Data sanity check (run before training!)
+#   Loads one batch and verifies the pipeline produces correct data.
+#   If mask_nonzero% is 0%, your dataset has no change labels.
+# ════════════════════════════════════════════════════════════════
+from torchgeo.datasets import LEVIRCDPlus
+
+_check_ds = LEVIRCDPlus(root=DATA_DIR, split="train", download=False)
+_sample   = _check_ds[0]
+_img      = _sample["image"]   # (2, 3, H, W) or (6, H, W)
+_mask     = _sample["mask"].float()
+
+print(f"Image shape : {_img.shape}")
+print(f"Image dtype : {_img.dtype}  min={_img.min():.3f}  max={_img.max():.3f}")
+print(f"Mask shape  : {_mask.shape}")
+print(f"Mask unique : {_mask.unique().tolist()}")
+print(f"Mask nonzero: {100*_mask.mean().item():.2f}%  ← should be > 0 for changed patches")
+
+assert _mask.max() > 0, "⚠️  ALL MASK VALUES ARE ZERO — check dataset extraction path!"
+print("✅ Data sanity check passed")
+del _check_ds, _sample, _img, _mask
+
+
+# ════════════════════════════════════════════════════════════════
 # CELL 6 ─ Smoke test  (~30 seconds, 2 mini-batches, no real data needed)
 #   Proves the full pipeline wires up before committing to 50 epochs.
 # ════════════════════════════════════════════════════════════════

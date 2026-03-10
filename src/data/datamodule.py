@@ -101,19 +101,27 @@ class UGIFDataModule(pl.LightningDataModule):
         val_tfm   = _compose_with_fusion(get_val_transforms(), self.patch_size, self.num_sar)
 
         if stage in ("fit", None):
-            # LEVIRCDPlus has no built-in val split — carve 20% off train
-            full_train = LEVIRCDPlus(
-                root=self.root,
-                split="train",
-                transforms=train_tfm,
-                download=True,
-            )
-            val_size   = max(1, int(0.2 * len(full_train)))
-            train_size = len(full_train) - val_size
-            self.train_dataset, self.val_dataset = random_split(
-                full_train, [train_size, val_size],
-                generator=torch.Generator().manual_seed(42),
-            )
+            # LEVIRCDPlus has no built-in val split.
+            # Use two separate dataset instances (each with the correct transform)
+            # and split by index so they don't share transforms.
+            full_train = LEVIRCDPlus(root=self.root, split="train", download=True)
+            n_total   = len(full_train)
+            val_size  = max(1, int(0.2 * n_total))
+            train_size = n_total - val_size
+
+            # Deterministic index split (no shuffle needed — indices are stable)
+            g = torch.Generator().manual_seed(42)
+            perm = torch.randperm(n_total, generator=g).tolist()
+            train_indices = perm[:train_size]
+            val_indices   = perm[train_size:]
+
+            # Wrap with correct transforms via Subset over separately-transformed datasets
+            train_ds = LEVIRCDPlus(root=self.root, split="train", transforms=train_tfm, download=True)
+            val_ds   = LEVIRCDPlus(root=self.root, split="train", transforms=val_tfm,   download=True)
+
+            self.train_dataset = Subset(train_ds, train_indices)
+            self.val_dataset   = Subset(val_ds,   val_indices)
+
         if stage in ("test", None):
             self.test_dataset = LEVIRCDPlus(
                 root=self.root,
