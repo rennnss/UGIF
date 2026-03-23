@@ -96,18 +96,23 @@ def compute_dii_grid(
                 f_pre  = model.model.encoder.forward_map(p)   # sigmoid activated
                 f_post = model.model.encoder.forward_map(q)
 
-                # Average over spatial dims → (k,)
-                fp = f_pre.mean(dim=(-2, -1)).squeeze(0)
-                fq = f_post.mean(dim=(-2, -1)).squeeze(0)
-
-                k = fp.shape[0]
+                k = f_pre.shape[1]
                 phi = 1.0 / k   # uniform normalised weight per indicator
 
-                # DII formula: φ * |f_pre + ε| / |f_post + ε| per indicator
-                ratio = torch.abs(fp + epsilon) / torch.abs(fq + epsilon)
-                dii   = (phi * ratio).sum().item()   # scalar for this cell
+                # Pixel-perfect DII: Calculate per spatial location in (h', w')
+                ratio = torch.abs(f_pre + epsilon) / torch.abs(f_post + epsilon)
+                dii_spatial = (phi * ratio).sum(dim=1, keepdim=True)  # (1, 1, h', w')
 
-                dii_map[r:r2, c:c2]   += dii
+                # Interpolate up to full patch size to restore pixel perfection
+                patch_h, patch_w = r2 - r, c2 - c
+                dii_upsampled = torch.nn.functional.interpolate(
+                    dii_spatial, 
+                    size=(patch_h, patch_w), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze().cpu().numpy()
+
+                dii_map[r:r2, c:c2]   += dii_upsampled
                 count_map[r:r2, c:c2] += 1.0
 
     # Average overlapping cells
@@ -122,6 +127,8 @@ def make_visualization(
     overall_dii: float,
     out_path: str,
     alpha: float = 0.55,
+    color: str = "dark_red",
+    threshold: float = 1.0
 ) -> None:
     """
     Save a side-by-side figure:
@@ -136,22 +143,44 @@ def make_visualization(
         Image.fromarray(dii_map).resize((W, H), Image.BILINEAR)
     )
 
-    # Normalise DII to [0, 1]
-    dmin, dmax = dii_resized.min(), dii_resized.max()
-    if dmax > dmin:
-        norm = (dii_resized - dmin) / (dmax - dmin)
+    # Robust percentile-based normalisation (handles extreme outlier pixels)
+    # Clip to [2nd, 98th] percentile so a few extreme spikes don't crush the rest to zero.
+    p_lo = np.percentile(dii_resized, 2)
+    p_hi = np.percentile(dii_resized, 98)
+    
+    if p_hi > p_lo + 1e-6:
+        norm = np.clip((dii_resized - p_lo) / (p_hi - p_lo), 0, 1)
     else:
         norm = np.zeros_like(dii_resized)
 
-    # Red heatmap: intensity = DII score
-    red_layer = np.zeros((H, W, 4), dtype=np.uint8)
-    red_layer[..., 0] = 255                           # R channel always 255
-    red_layer[..., 3] = (norm * 255 * alpha).astype(np.uint8)  # alpha
-    red_pil = Image.fromarray(red_layer, mode="RGBA")
+    # Optional: if a hard threshold is set, zero out pixels that are below it
+    if threshold > 0:
+        base = np.percentile(dii_resized, threshold * 50)  # rough mapping
+        norm = np.where(dii_resized >= base, norm, norm * 0.15)  # dim; not fully blank
+
+    # Heatmap color mask: intensity = DII score
+    color_layer = np.zeros((H, W, 4), dtype=np.uint8)
+    if color == "red":
+        color_layer[..., 0] = 255
+    elif color == "dark_red":
+        color_layer[..., 0] = 200   # Better contrast than 160 against dark SAR
+    elif color == "cyan":
+        color_layer[..., 1] = 255
+        color_layer[..., 2] = 255
+    elif color == "magenta":
+        color_layer[..., 0] = 255
+        color_layer[..., 2] = 255
+    elif color == "yellow":
+        color_layer[..., 0] = 255
+        color_layer[..., 1] = 255
+        
+    color_layer[..., 3] = (norm * 255 * alpha).astype(np.uint8)  # alpha
+
+    color_pil = Image.fromarray(color_layer, mode="RGBA")
 
     # Overlay heatmap on post image
     post_rgba = post_img.convert("RGBA")
-    overlay   = Image.alpha_composite(post_rgba, red_pil).convert("RGB")
+    overlay   = Image.alpha_composite(post_rgba, color_pil).convert("RGB")
 
     # Compose side-by-side canvas
     pad   = 8
@@ -184,6 +213,10 @@ def main():
     parser.add_argument("--patch",  type=int, default=256)
     parser.add_argument("--stride", type=int, default=128,
                         help="Smaller = finer heatmap, slower")
+    parser.add_argument("--color",  type=str, default="dark_red", choices=["red", "dark_red", "cyan", "magenta", "yellow"],
+                        help="Heatmap mask color (dark_red is default)")
+    parser.add_argument("--threshold", type=float, default=1.0,
+                        help="Absolute DII damage threshold. Default 1.0.")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -215,7 +248,7 @@ def main():
     print(f"  > 1.0 = damage detected | ≈ 1.0 = no significant change")
 
     # Save visualisation
-    make_visualization(args.pre, args.post, dii_map, overall_dii, args.out)
+    make_visualization(args.pre, args.post, dii_map, overall_dii, args.out, color=args.color, threshold=args.threshold)
 
 
 if __name__ == "__main__":
